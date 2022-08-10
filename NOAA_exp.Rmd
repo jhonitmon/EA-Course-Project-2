@@ -1,0 +1,99 @@
+---
+title: "Exploration of the NOAA Storm Database"
+author: "Jonathan Giraldo"
+date: "11/05/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Synopsis
+The goal of this analysis is to answer basic questions about severe weather events using data from the NOAA Storm Database. These questions are about the harmfulness of these events and their economic consequences. It was then found that the most harmful event are Tornadoes, and that the most economically damaging are Floods
+
+## Data Processing
+We begin by loading the needed libraries and reading the data, which is stored in the data folder.
+```{r}
+library(dplyr)
+library(ggplot2)
+library(gridExtra)
+data <- read.csv("./data/repdata_data_StormData.csv")
+data$EVTYPE <- as.factor(data$EVTYPE)
+head(data)
+```
+
+##Results
+To see the most harmful events we create a new data frame containing only the Event Type and the number of Fatalities and Injuries. We then summarise and sum the fatalities and injuries of each event type., Next we sort by fatalities to see the deadliest events
+```{r}
+health_data <- data[,c("EVTYPE","FATALITIES","INJURIES")] 
+health_data <- health_data %>% group_by(EVTYPE) %>% summarise(across(everything(),sum))
+head(health_data[order(health_data$FATALITIES,decreasing = T),])
+```
+
+and then the events that cause the most injuries
+```{r}
+head(health_data[order(health_data$INJURIES,decreasing = T),])
+```
+
+As we can see, tornadoes cause the highest number of fatalities and injuries. We then take the top seven deadliest events and plot them
+```{r}
+most_harm <- health_data[order(health_data$FATALITIES,decreasing = T),][1:7,]
+p1 <- ggplot(data = most_harm,aes(y = reorder(EVTYPE,FATALITIES), x = FATALITIES)) + geom_bar(stat = "identity",fill = "red") + ggtitle("Top 7 Most Harmful Events") + theme(plot.title = element_text(hjust = 0.5)) + ylab("Event Type") + xlab("Fatalities")
+p2 <- ggplot(data = most_harm,aes(y = reorder(EVTYPE,INJURIES), x = INJURIES)) + geom_bar(stat = "identity",fill = "blue") + ylab("Event Type") + xlab("Injuries")
+grid.arrange(p1,p2,nrow = 2)
+```
+
+After analyzing harm to health, we proceed to evaluate economic damage. To analyze both crop damage and property damage we need to put these values in the same scale. The PROPDMGEXP and CROPDMGEXP columns contain the exponent of the PROPDMG and CROPDMG values. Using unique() we see the following:
+```{r}
+unique(data$PROPDMGEXP)
+```
+```{r}
+unique(data$CROPDMGEXP)
+```
+
+Some of these values don't make sense as exponents and the documentation for the database doesn't include an explanation for these strange values. We then found this [guide](https://rstudio-pubs-static.s3.amazonaws.com/58957_37b6723ee52b455990e149edde45e5b6.html) that cross-references the data with the official database. We then decided to filter out results that don't include the H (hundred), K (kilo), M (millions) and B (billions) since in comparison the other values are irrelevant
+```{r}
+econ_data <- data[,c("EVTYPE","PROPDMG","PROPDMGEXP","CROPDMG","CROPDMGEXP")]
+econ_data <- subset(econ_data,PROPDMGEXP == "H" | PROPDMGEXP == "h" 
+                    | PROPDMGEXP == "K" | PROPDMGEXP == "k" 
+                    | PROPDMGEXP == "M" | PROPDMGEXP == "m" 
+                    | PROPDMGEXP == "B" | PROPDMGEXP == "b" 
+                    | CROPDMGEXP == "H" | CROPDMGEXP == "h" 
+                    | CROPDMGEXP == "K" | CROPDMGEXP == "k" 
+                    | CROPDMGEXP == "M" | CROPDMGEXP == "m" 
+                    | CROPDMGEXP == "B" | CROPDMGEXP == "b")
+
+```
+
+After filtering, we then multiply or divide the damage costs to compare all values in millions of dollars
+```{r}
+for(i in 1:nrow(econ_data)) {
+
+  if(econ_data$PROPDMGEXP[i] == "K" | econ_data$PROPDMGEXP[i] == "k") {
+    econ_data$PROPDMG[i] = econ_data$PROPDMG[i] / 1000
+  } else if(econ_data$PROPDMGEXP[i] == "B" | econ_data$PROPDMGEXP[i] == "b") {
+    econ_data$PROPDMG[i] = econ_data$PROPDMG[i] * 1000
+  } else if(econ_data$PROPDMGEXP[i] == "H" | econ_data$PROPDMGEXP[i] == "h") {
+    econ_data$PROPDMG[i] = econ_data$PROPDMG[i] / 10000
+  }
+
+  if(econ_data$CROPDMGEXP[i] == "K" | econ_data$CROPDMGEXP[i] == "k") {
+    econ_data$CROPDMG[i] = econ_data$CROPDMG[i] / 1000
+  } else if(econ_data$CROPDMGEXP[i] == "B" | econ_data$CROPDMGEXP[i] == "b") {
+    econ_data$CROPDMG[i] = econ_data$CROPDMG[i] * 1000
+  } else if(econ_data$CROPDMGEXP[i] == "H" | econ_data$CROPDMGEXP[i] == "h") {
+    econ_data$CROPDMG[i] = econ_data$CROPDMG[i] / 10000
+  }
+}
+```
+
+And finally, we sum both crop and property damages and take the seven most economically damaging events
+```{r}
+econ_data$TOTALDMG <- econ_data$PROPDMG + econ_data$CROPDMG
+total_dmg <- econ_data %>% group_by(EVTYPE) %>% summarise(TOTALDMG = sum(TOTALDMG))
+most_dmg <- econ_data[order(econ_data$TOTALDMG,decreasing = T),][1:7,]
+ggplot(data = most_dmg,aes(y = reorder(EVTYPE,TOTALDMG), x = TOTALDMG)) + geom_bar(stat = "identity",fill = "green") + ggtitle("Top 7 Most Economically Damaging Events") + theme(plot.title = element_text(hjust = 0.5)) + ylab("Event Type") + xlab("Total Damage Cost in Millions (USD)")
+```
+
+We can see that the event tat causes the most damage are Floods and Storm Surges.
